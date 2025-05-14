@@ -135,14 +135,20 @@
             background-color: rgba(0, 0, 0, 0.5);
             align-items: center;
             justify-content: center;
+            z-index: 1000;
         }
 
         .modal-content {
             background-color: white;
-            padding: 30px;
+            padding: 20px;
             border-radius: 10px;
             text-align: center;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            /* Position the modal at the bottom of the screen */
+            position: absolute;
+            bottom: 10%;
+            width: 80%;
+            max-width: 400px;
         }
 
         button {
@@ -161,6 +167,41 @@
             background-color: #45a049;
         }
 
+        #game-mode-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .difficulty-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 15px;
+        }
+
+        .difficulty-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .difficulty-button {
+            background-color: #3498db;
+        }
+
+        .difficulty-button.selected {
+            background-color: #2980b9;
+            box-shadow: 0 0 5px 2px rgba(0, 0, 0, 0.2);
+        }
+
+        #thinking {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+            display: none;
+        }
+
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7); }
             70% { box-shadow: 0 0 0 10px rgba(0, 255, 0, 0); }
@@ -174,11 +215,25 @@
     <div id="landing">
         <h2>Welcome to Three Men's Morris</h2>
         <p>A classic strategy board game for two players.</p>
-        <button id="start-btn">Start New Game</button>
+        
+        <div id="game-mode-container">
+            <button id="vs-player-btn">Play vs Player</button>
+            <button id="vs-computer-btn">Play vs Computer</button>
+        </div>
+        
+        <div class="difficulty-container" style="display: none;">
+            <p>Select difficulty:</p>
+            <div class="difficulty-buttons">
+                <button class="difficulty-button" data-level="easy">Easy</button>
+                <button class="difficulty-button selected" data-level="medium">Medium</button>
+                <button class="difficulty-button" data-level="hard">Hard</button>
+            </div>
+        </div>
     </div>
 
     <div id="game-container">
         <div id="status">Starting game...</div>
+        <div id="thinking">Computer is thinking...</div>
         
         <div id="board">
             <!-- Board lines -->
@@ -198,12 +253,15 @@
             <div class="position" id="pos-7" data-position="7" style="left: 50%; top: 80%;"></div>
             <div class="position" id="pos-8" data-position="8" style="left: 80%; top: 80%;"></div>
         </div>
+        
+        <button id="back-to-menu">Back to Menu</button>
     </div>
 
     <div id="modal">
         <div class="modal-content">
             <h2 id="winner-text">Player X Wins!</h2>
             <button id="new-game-btn">Play Again</button>
+            <button id="back-to-menu-btn">Back to Menu</button>
         </div>
     </div>
 
@@ -213,14 +271,23 @@
         let gameState = null;
         let selectedPiece = null;
         let validMoves = [];
+        let vsComputer = false;
+        let computerDifficulty = 'medium';
+        let computerThinking = false;
         
         // DOM elements
         const landing = document.getElementById('landing');
         const gameContainer = document.getElementById('game-container');
         const statusDisplay = document.getElementById('status');
+        const thinkingDisplay = document.getElementById('thinking');
         const modal = document.getElementById('modal');
         const winnerText = document.getElementById('winner-text');
-        const startBtn = document.getElementById('start-btn');
+        const vsPlayerBtn = document.getElementById('vs-player-btn');
+        const vsComputerBtn = document.getElementById('vs-computer-btn');
+        const difficultyContainer = document.querySelector('.difficulty-container');
+        const difficultyButtons = document.querySelectorAll('.difficulty-button');
+        const backToMenuBtn = document.getElementById('back-to-menu');
+        const backToMenuModalBtn = document.getElementById('back-to-menu-btn');
         const newGameBtn = document.getElementById('new-game-btn');
         const positions = document.querySelectorAll('.position');
 
@@ -228,19 +295,61 @@
         const API_URL = 'http://localhost:3002';
 
         // Initialize game
-        startBtn.addEventListener('click', startGame);
-        newGameBtn.addEventListener('click', startGame);
+        vsPlayerBtn.addEventListener('click', () => {
+            vsComputer = false;
+            startGame();
+        });
+        
+        vsComputerBtn.addEventListener('click', () => {
+            difficultyContainer.style.display = 'flex';
+        });
+        
+        difficultyButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                difficultyButtons.forEach(btn => btn.classList.remove('selected'));
+                button.classList.add('selected');
+                computerDifficulty = button.dataset.level;
+                vsComputer = true;
+                startGame();
+            });
+        });
+        
+        backToMenuBtn.addEventListener('click', showMenu);
+        backToMenuModalBtn.addEventListener('click', showMenu);
+        newGameBtn.addEventListener('click', () => {
+            if (vsComputer) {
+                startGame();
+            } else {
+                startGame();
+            }
+        });
 
         // Add click handlers to all positions
         positions.forEach(position => {
-            position.addEventListener('click', () => handlePositionClick(position));
+            position.addEventListener('click', () => {
+                // Don't allow moves when computer is thinking
+                if (computerThinking) return;
+                handlePositionClick(position);
+            });
         });
+
+        // Show menu
+        function showMenu() {
+            landing.style.display = 'block';
+            gameContainer.style.display = 'none';
+            modal.style.display = 'none';
+            difficultyContainer.style.display = 'none';
+        }
 
         // Start a new game
         async function startGame() {
             try {
                 const response = await fetch(`${API_URL}/start3`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ vsComputer, computerDifficulty })
                 });
                 
                 const data = await response.json();
@@ -254,6 +363,11 @@
                 modal.style.display = 'none';
                 
                 updateUI();
+                
+                // If computer goes first (playing as X), make its move
+                if (vsComputer && gameState.currentPlayer === 'X') {
+                    makeComputerMove();
+                }
             } catch (error) {
                 console.error('Error starting game:', error);
                 alert('Error starting game. Please try again.');
@@ -274,11 +388,25 @@
         function updateUI() {
             // Update status text
             if (gameState.winner) {
-                statusDisplay.textContent = `Player ${gameState.winner} wins!`;
+                let winnerMessage = `Player ${gameState.winner} wins!`;
+                if (vsComputer) {
+                    winnerMessage = gameState.winner === 'X' ? 'Computer wins!' : 'You win!';
+                }
+                statusDisplay.textContent = winnerMessage;
                 showWinnerModal(gameState.winner);
             } else {
                 const phase = gameState.phase.charAt(0).toUpperCase() + gameState.phase.slice(1);
-                statusDisplay.textContent = `Phase: ${phase} | Player ${gameState.currentPlayer}'s turn`;
+                let statusMessage = `Phase: ${phase} | Player ${gameState.currentPlayer}'s turn`;
+                
+                if (vsComputer) {
+                    if (gameState.currentPlayer === 'X') {
+                        statusMessage = `Phase: ${phase} | Computer's turn`;
+                    } else {
+                        statusMessage = `Phase: ${phase} | Your turn`;
+                    }
+                }
+                
+                statusDisplay.textContent = statusMessage;
             }
             
             // Update board
@@ -303,12 +431,17 @@
         // Handle position click
         async function handlePositionClick(position) {
             if (gameState.winner) return;
+            if (vsComputer && gameState.currentPlayer === 'X') return; // Can't play during computer's turn
             
             const positionIndex = position.dataset.position;
             
             try {
                 if (gameState.phase === 'placing') {
                     await placePiece(positionIndex);
+                    // After player's move, make computer move if playing vs computer
+                    if (vsComputer && !gameState.winner && gameState.currentPlayer === 'X') {
+                        makeComputerMove();
+                    }
                 } else { // moving phase
                     const hasPiece = gameState.board[positionIndex] !== null;
                     const isCurrentPlayerPiece = gameState.board[positionIndex] === gameState.currentPlayer;
@@ -319,6 +452,10 @@
                     } else if (selectedPiece !== null && validMoves.includes(Number(positionIndex))) {
                         // Move the selected piece
                         await movePiece(selectedPiece, positionIndex);
+                        // After player's move, make computer move if playing vs computer
+                        if (vsComputer && !gameState.winner && gameState.currentPlayer === 'X') {
+                            makeComputerMove();
+                        }
                     } else if (hasPiece && isCurrentPlayerPiece) {
                         // Change selection to another piece
                         await selectPiece(positionIndex);
@@ -330,6 +467,45 @@
                     alert(error.message);
                 }
             }
+        }
+
+        // Make computer move
+        async function makeComputerMove() {
+            if (gameState.winner) return;
+            
+            computerThinking = true;
+            thinkingDisplay.style.display = 'block';
+            
+            // Add a small delay to make the computer "think"
+            setTimeout(async () => {
+                try {
+                    const response = await fetch(`${API_URL}/computer-move`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ 
+                            gameId, 
+                            difficulty: computerDifficulty 
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        gameState = data.game;
+                        updateUI();
+                    } else {
+                        throw new Error(data.error);
+                    }
+                } catch (error) {
+                    console.error('Error making computer move:', error);
+                    alert('Error with computer move. Please try again.');
+                } finally {
+                    computerThinking = false;
+                    thinkingDisplay.style.display = 'none';
+                }
+            }, 700); // Delay for 700ms to give a visual indication of "thinking"
         }
 
         // Place a piece during the placing phase
@@ -433,7 +609,11 @@
 
         // Show the winner modal
         function showWinnerModal(winner) {
-            winnerText.textContent = `Player ${winner} Wins!`;
+            let winnerMessage = `Player ${winner} Wins!`;
+            if (vsComputer) {
+                winnerMessage = winner === 'X' ? 'Computer Wins!' : 'You Win!';
+            }
+            winnerText.textContent = winnerMessage;
             modal.style.display = 'flex';
         }
     </script>
