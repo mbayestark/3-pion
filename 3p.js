@@ -1,621 +1,389 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three Men's Morris</title>
-    <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f5f5f5;
-        }
+const express = require('express');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
 
-        #landing {
-            text-align: center;
-            margin-bottom: 20px;
-        }
+const app = express();
+const PORT = process.env.PORT || 3002;
 
-        #game-container {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            margin-top: 20px;
-            position: relative;
-            overflow: visible;
-            padding-bottom: 100px; /* Space for the extended diagonals */
-        }
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
 
-        #status {
-            font-size: 1.5rem;
-            margin: 20px 0;
-            text-align: center;
-        }
+// In-memory game storage
+const games = {};
 
-        #board {
-            position: relative;
-            width: 300px;
-            height: 300px;
-            background-color: #d2b48c;
-            border: 2px solid #8b4513;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-            margin-bottom: 100px; /* Add space below the board for the extended diagonals */
-        }
+// Define board positions and adjacency
+const ADJACENCY = {
+  '0': [1, 3, 4],
+  '1': [0, 2, 4],
+  '2': [1, 4, 5],
+  '3': [0, 4, 6],
+  '4': [0, 1, 2, 3, 5, 6, 7, 8],
+  '5': [2, 4, 8],
+  '6': [3, 4, 7],
+  '7': [4, 6, 8],
+  '8': [4, 5, 7]
+};
 
-        .position {
-            position: absolute;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: #eee;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            transform: translate(-50%, -50%);
-        }
+// The win patterns (three in a row)
+const WIN_PATTERNS = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
+  [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
+  [0, 4, 8], [2, 4, 6]             // diagonals
+];
 
-        .position:hover {
-            transform: translate(-50%, -50%) scale(1.1);
-            background-color: #ddd;
-        }
+// Check if there's a winner (three in a row)
+function checkWinner(board) {
+  for (const pattern of WIN_PATTERNS) {
+    const [a, b, c] = pattern;
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return board[a];
+    }
+  }
+  
+  return null;
+}
 
-        .position.valid-move {
-            background-color: #aaffaa;
-            animation: pulse 1.5s infinite;
-        }
-
-        .position.selected {
-            background-color: #fff59d;
-            border: 2px solid #ff9800;
-        }
-
-        .piece-x {
-            color: #e74c3c;
-        }
-
-        .piece-o {
-            color: #3498db;
-        }
-
-        /* Board Lines */
-        .line {
-            position: absolute;
-            background-color: #8b4513;
-        }
-
-        .horizontal {
-            height: 2px;
-            width: 100%;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-
-        .vertical {
-            width: 2px;
-            height: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .diagonal1 {
-            width: 2px;
-            height: 141%; /* Approximately sqrt(2) times the width for a perfect corner-to-corner diagonal */
-            transform: rotate(45deg);
-            transform-origin: top right;
-            right: 0;
-            top: 0;
-        }
-
-        .diagonal2 {
-            width: 2px;
-            height: 141%; /* Approximately sqrt(2) times the width for a perfect corner-to-corner diagonal */
-            transform: rotate(-45deg);
-            transform-origin: top left;
-            left: 0;
-            top: 0;
-        }
-
-        #modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .modal-content {
-            background-color: white;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-            /* Position the modal at the bottom of the screen */
-            position: absolute;
-            bottom: 10%;
-            width: 80%;
-            max-width: 400px;
-        }
-
-        button {
-            padding: 10px 20px;
-            font-size: 1rem;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            margin: 10px;
-        }
-
-        button:hover {
-            background-color: #45a049;
-        }
-
-        #game-mode-container {
-            display: flex;
-            justify-content: center;
-            margin: 20px 0;
-        }
-
-        .difficulty-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-top: 15px;
-        }
-
-        .difficulty-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .difficulty-button {
-            background-color: #3498db;
-        }
-
-        .difficulty-button.selected {
-            background-color: #2980b9;
-            box-shadow: 0 0 5px 2px rgba(0, 0, 0, 0.2);
-        }
-
-        #thinking {
-            margin-top: 10px;
-            font-style: italic;
-            color: #666;
-            display: none;
-        }
-
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(0, 255, 0, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0); }
-        }
-    </style>
-</head>
-<body>
-    <h1>Three Men's Morris</h1>
+// Find a winning move for the given player
+function findWinningMove(board, player) {
+  // Check each win pattern
+  for (const pattern of WIN_PATTERNS) {
+    const [a, b, c] = pattern;
     
-    <div id="landing">
-        <h2>Welcome to Three Men's Morris</h2>
-        <p>A classic strategy board game for two players.</p>
+    // Check if this pattern has two of player's pieces and an empty space
+    if (board[a] === player && board[b] === player && board[c] === null) {
+      return c;
+    }
+    if (board[a] === player && board[c] === player && board[b] === null) {
+      return b;
+    }
+    if (board[b] === player && board[c] === player && board[a] === null) {
+      return a;
+    }
+  }
+  
+  return null;
+}
+
+// Start a new game
+app.post('/start3', (req, res) => {
+  const gameId = uuidv4();
+  const { vsComputer, computerDifficulty } = req.body;
+  
+  games[gameId] = {
+    board: Array(9).fill(null),
+    currentPlayer: 'X',
+    phase: 'placing',
+    piecesPlaced: { X: 0, O: 0 },
+    selectedPiece: null,
+    vsComputer: vsComputer || false,
+    computerDifficulty: computerDifficulty || 'medium'
+  };
+  
+  res.json({ gameId, game: games[gameId] });
+});
+
+// Get game state
+app.get('/game/:id', (req, res) => {
+  const gameId = req.params.id;
+  if (!games[gameId]) {
+    return res.status(404).json({ error: 'Game not found' });
+  }
+  
+  res.json({ game: games[gameId] });
+});
+
+// Place a piece (during placing phase)
+app.post('/place', (req, res) => {
+  const { gameId, position } = req.body;
+  
+  if (!games[gameId]) {
+    return res.status(404).json({ error: 'Game not found' });
+  }
+  
+  const game = games[gameId];
+  
+  if (game.phase !== 'placing') {
+    return res.status(400).json({ error: 'Game is not in placing phase' });
+  }
+  
+  if (game.board[position] !== null) {
+    return res.status(400).json({ error: 'Position already occupied' });
+  }
+  
+  // Place the piece
+  game.board[position] = game.currentPlayer;
+  game.piecesPlaced[game.currentPlayer]++;
+  
+  // Check for winner after placement
+  const winner = checkWinner(game.board);
+  if (winner) {
+    game.winner = winner;
+    res.json({ game, message: `${winner} wins!` });
+    return;
+  }
+  
+  // Check if all pieces have been placed
+  if (game.piecesPlaced.X === 3 && game.piecesPlaced.O === 3) {
+    game.phase = 'moving';
+  }
+  
+  // Switch player
+  game.currentPlayer = game.currentPlayer === 'X' ? 'O' : 'X';
+  
+  res.json({ game });
+});
+
+// Select a piece to move (first part of moving phase)
+app.post('/select', (req, res) => {
+  const { gameId, position } = req.body;
+  
+  if (!games[gameId]) {
+    return res.status(404).json({ error: 'Game not found' });
+  }
+  
+  const game = games[gameId];
+  
+  if (game.phase !== 'moving') {
+    return res.status(400).json({ error: 'Game is not in moving phase' });
+  }
+  
+  if (game.board[position] !== game.currentPlayer) {
+    return res.status(400).json({ error: 'Not your piece' });
+  }
+  
+  // Get valid moves for the selected piece
+  const validMoves = ADJACENCY[position].filter(pos => game.board[pos] === null);
+  
+  if (validMoves.length === 0) {
+    return res.status(400).json({ error: 'This piece has no valid moves' });
+  }
+  
+  game.selectedPiece = parseInt(position);
+  
+  res.json({ game, validMoves });
+});
+
+// Move a piece (second part of moving phase)
+app.post('/move3', (req, res) => {
+  const { gameId, fromPosition, toPosition } = req.body;
+  
+  if (!games[gameId]) {
+    return res.status(404).json({ error: 'Game not found' });
+  }
+  
+  const game = games[gameId];
+  
+  if (game.phase !== 'moving') {
+    return res.status(400).json({ error: 'Game is not in moving phase' });
+  }
+  
+  if (game.board[fromPosition] !== game.currentPlayer) {
+    return res.status(400).json({ error: 'Not your piece' });
+  }
+  
+  if (game.board[toPosition] !== null) {
+    return res.status(400).json({ error: 'Destination position is occupied' });
+  }
+  
+  // Check if the move is valid (adjacent)
+  if (!ADJACENCY[fromPosition].includes(Number(toPosition))) {
+    return res.status(400).json({ error: 'Invalid move. Positions must be adjacent' });
+  }
+  
+  // Move the piece
+  game.board[toPosition] = game.currentPlayer;
+  game.board[fromPosition] = null;
+  game.selectedPiece = null;
+  
+  // Check for winner after movement
+  const winner = checkWinner(game.board);
+  if (winner) {
+    game.winner = winner;
+    res.json({ game, message: `${winner} wins!` });
+    return;
+  }
+  
+  // Switch player
+  game.currentPlayer = game.currentPlayer === 'X' ? 'O' : 'X';
+  
+  res.json({ game });
+});
+
+// Computer move endpoint
+app.post('/computer-move', (req, res) => {
+  const { gameId, difficulty } = req.body;
+  
+  if (!games[gameId]) {
+    return res.status(404).json({ error: 'Game not found' });
+  }
+  
+  const game = games[gameId];
+  
+  if (game.currentPlayer !== 'X') {
+    return res.status(400).json({ error: 'Not computer\'s turn' });
+  }
+  
+  try {
+    if (game.phase === 'placing') {
+      // Computer makes a placing move
+      makeComputerPlacingMove(game, difficulty);
+    } else {
+      // Computer makes a moving move
+      makeComputerMovingMove(game, difficulty);
+    }
+    
+    // Check for winner after computer's move
+    const winner = checkWinner(game.board);
+    if (winner) {
+      game.winner = winner;
+      return res.json({ game, message: `${winner} wins!` });
+    }
+    
+    // Switch to player's turn
+    game.currentPlayer = 'O';
+    
+    res.json({ game });
+  } catch (error) {
+    res.status(500).json({ error: 'Error making computer move: ' + error.message });
+  }
+});
+
+// Computer AI logic for placing phase
+function makeComputerPlacingMove(game, difficulty) {
+  const board = game.board;
+  
+  // If difficulty is set to hard, try to make a winning move or block player's winning move
+  if (difficulty === 'hard') {
+    // Check if computer can win in one move
+    const winningMove = findWinningMove(board, 'X');
+    if (winningMove !== null) {
+      board[winningMove] = 'X';
+      game.piecesPlaced.X++;
+      return;
+    }
+    
+    // Check if player can win in one move and block it
+    const blockingMove = findWinningMove(board, 'O');
+    if (blockingMove !== null) {
+      board[blockingMove] = 'X';
+      game.piecesPlaced.X++;
+      return;
+    }
+  }
+  
+  // Medium and hard: strategic moves
+  if (difficulty !== 'easy') {
+    // Take center if available as it's connected to all positions
+    if (board[4] === null) {
+      board[4] = 'X';
+      game.piecesPlaced.X++;
+      return;
+    }
+    
+    // Take a corner if one is available (better strategic position)
+    const corners = [0, 2, 6, 8].filter(pos => board[pos] === null);
+    if (corners.length > 0) {
+      const randomCorner = corners[Math.floor(Math.random() * corners.length)];
+      board[randomCorner] = 'X';
+      game.piecesPlaced.X++;
+      return;
+    }
+  }
+  
+  // Fallback: place randomly (easy difficulty or if no strategic move available)
+  const emptyPositions = board.map((val, idx) => val === null ? idx : -1).filter(idx => idx !== -1);
+  if (emptyPositions.length > 0) {
+    const randomPosition = emptyPositions[Math.floor(Math.random() * emptyPositions.length)];
+    board[randomPosition] = 'X';
+    game.piecesPlaced.X++;
+  }
+}
+
+// Computer AI logic for moving phase
+function makeComputerMovingMove(game, difficulty) {
+  const board = game.board;
+  
+  // Find all computer pieces on the board
+  const computerPieces = board.map((val, idx) => val === 'X' ? idx : -1).filter(idx => idx !== -1);
+  
+  // Choose the best move based on difficulty
+  if (difficulty === 'hard' || difficulty === 'medium') {
+    // Try to find a winning move
+    for (const piecePos of computerPieces) {
+      const validMoves = ADJACENCY[piecePos].filter(pos => board[pos] === null);
+      
+      for (const movePos of validMoves) {
+        // Simulate the move to check if it results in a win
+        board[movePos] = 'X';
+        board[piecePos] = null;
         
-        <div id="game-mode-container">
-            <button id="vs-player-btn">Play vs Player</button>
-            <button id="vs-computer-btn">Play vs Computer</button>
-        </div>
+        const isWinningMove = checkWinner(board) === 'X';
         
-        <div class="difficulty-container" style="display: none;">
-            <p>Select difficulty:</p>
-            <div class="difficulty-buttons">
-                <button class="difficulty-button" data-level="easy">Easy</button>
-                <button class="difficulty-button selected" data-level="medium">Medium</button>
-                <button class="difficulty-button" data-level="hard">Hard</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="game-container">
-        <div id="status">Starting game...</div>
-        <div id="thinking">Computer is thinking...</div>
+        // Undo the move
+        board[piecePos] = 'X';
+        board[movePos] = null;
         
-        <div id="board">
-            <!-- Board lines -->
-            <div class="line horizontal"></div>
-            <div class="line vertical"></div>
-            <div class="line diagonal1"></div>
-            <div class="line diagonal2"></div>
-            
-            <!-- Board positions -->
-            <div class="position" id="pos-0" data-position="0" style="left: 20%; top: 20%;"></div>
-            <div class="position" id="pos-1" data-position="1" style="left: 50%; top: 20%;"></div>
-            <div class="position" id="pos-2" data-position="2" style="left: 80%; top: 20%;"></div>
-            <div class="position" id="pos-3" data-position="3" style="left: 20%; top: 50%;"></div>
-            <div class="position" id="pos-4" data-position="4" style="left: 50%; top: 50%;"></div>
-            <div class="position" id="pos-5" data-position="5" style="left: 80%; top: 50%;"></div>
-            <div class="position" id="pos-6" data-position="6" style="left: 20%; top: 80%;"></div>
-            <div class="position" id="pos-7" data-position="7" style="left: 50%; top: 80%;"></div>
-            <div class="position" id="pos-8" data-position="8" style="left: 80%; top: 80%;"></div>
-        </div>
-        
-        <button id="back-to-menu">Back to Menu</button>
-    </div>
-
-    <div id="modal">
-        <div class="modal-content">
-            <h2 id="winner-text">Player X Wins!</h2>
-            <button id="new-game-btn">Play Again</button>
-            <button id="back-to-menu-btn">Back to Menu</button>
-        </div>
-    </div>
-
-    <script>
-        // Game state
-        let gameId = null;
-        let gameState = null;
-        let selectedPiece = null;
-        let validMoves = [];
-        let vsComputer = false;
-        let computerDifficulty = 'medium';
-        let computerThinking = false;
-        
-        // DOM elements
-        const landing = document.getElementById('landing');
-        const gameContainer = document.getElementById('game-container');
-        const statusDisplay = document.getElementById('status');
-        const thinkingDisplay = document.getElementById('thinking');
-        const modal = document.getElementById('modal');
-        const winnerText = document.getElementById('winner-text');
-        const vsPlayerBtn = document.getElementById('vs-player-btn');
-        const vsComputerBtn = document.getElementById('vs-computer-btn');
-        const difficultyContainer = document.querySelector('.difficulty-container');
-        const difficultyButtons = document.querySelectorAll('.difficulty-button');
-        const backToMenuBtn = document.getElementById('back-to-menu');
-        const backToMenuModalBtn = document.getElementById('back-to-menu-btn');
-        const newGameBtn = document.getElementById('new-game-btn');
-        const positions = document.querySelectorAll('.position');
-
-        // API URL - Change this to your server URL in production
-        const API_URL = 'http://localhost:3002';
-
-        // Initialize game
-        vsPlayerBtn.addEventListener('click', () => {
-            vsComputer = false;
-            startGame();
-        });
-        
-        vsComputerBtn.addEventListener('click', () => {
-            difficultyContainer.style.display = 'flex';
-        });
-        
-        difficultyButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                difficultyButtons.forEach(btn => btn.classList.remove('selected'));
-                button.classList.add('selected');
-                computerDifficulty = button.dataset.level;
-                vsComputer = true;
-                startGame();
-            });
-        });
-        
-        backToMenuBtn.addEventListener('click', showMenu);
-        backToMenuModalBtn.addEventListener('click', showMenu);
-        newGameBtn.addEventListener('click', () => {
-            if (vsComputer) {
-                startGame();
-            } else {
-                startGame();
-            }
-        });
-
-        // Add click handlers to all positions
-        positions.forEach(position => {
-            position.addEventListener('click', () => {
-                // Don't allow moves when computer is thinking
-                if (computerThinking) return;
-                handlePositionClick(position);
-            });
-        });
-
-        // Show menu
-        function showMenu() {
-            landing.style.display = 'block';
-            gameContainer.style.display = 'none';
-            modal.style.display = 'none';
-            difficultyContainer.style.display = 'none';
+        if (isWinningMove) {
+          // Make the winning move
+          board[movePos] = 'X';
+          board[piecePos] = null;
+          return;
         }
-
-        // Start a new game
-        async function startGame() {
-            try {
-                const response = await fetch(`${API_URL}/start3`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ vsComputer, computerDifficulty })
-                });
-                
-                const data = await response.json();
-                gameId = data.gameId;
-                gameState = data.game;
-                
-                // Reset UI
-                resetBoard();
-                landing.style.display = 'none';
-                gameContainer.style.display = 'flex';
-                modal.style.display = 'none';
-                
-                updateUI();
-                
-                // If computer goes first (playing as X), make its move
-                if (vsComputer && gameState.currentPlayer === 'X') {
-                    makeComputerMove();
-                }
-            } catch (error) {
-                console.error('Error starting game:', error);
-                alert('Error starting game. Please try again.');
-            }
+      }
+    }
+    
+    // No winning move found
+    if (difficulty === 'hard') {
+      // Try to block player's potential winning moves (hard difficulty only)
+      // This is more complex in the moving phase, as we'd need to simulate 
+      // the player's next move after our move
+      
+      // For now, move to center if possible, as it's strategically valuable
+      for (const piecePos of computerPieces) {
+        if (ADJACENCY[piecePos].includes(4) && board[4] === null) {
+          board[4] = 'X';
+          board[piecePos] = null;
+          return;
         }
-
-        // Reset the board UI
-        function resetBoard() {
-            positions.forEach(position => {
-                position.textContent = '';
-                position.classList.remove('piece-x', 'piece-o', 'selected', 'valid-move');
-            });
-            selectedPiece = null;
-            validMoves = [];
+      }
+      
+      // Or move to a corner if possible
+      const corners = [0, 2, 6, 8];
+      for (const piecePos of computerPieces) {
+        for (const corner of corners) {
+          if (ADJACENCY[piecePos].includes(corner) && board[corner] === null) {
+            board[corner] = 'X';
+            board[piecePos] = null;
+            return;
+          }
         }
+      }
+    }
+  }
+  
+  // Fallback: make a random valid move (used for easy difficulty or if no strategic move found)
+  // Shuffle the pieces array to add randomness
+  for (let i = computerPieces.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [computerPieces[i], computerPieces[j]] = [computerPieces[j], computerPieces[i]];
+  }
+  
+  // Try each piece until a valid move is found
+  for (const piecePos of computerPieces) {
+    const validMoves = ADJACENCY[piecePos].filter(pos => board[pos] === null);
+    
+    if (validMoves.length > 0) {
+      const randomMovePos = validMoves[Math.floor(Math.random() * validMoves.length)];
+      board[randomMovePos] = 'X';
+      board[piecePos] = null;
+      return;
+    }
+  }
+  
+  // If no valid move found, the game is in a stalemate (shouldn't happen in Three Men's Morris)
+  throw new Error('No valid move available for computer');
+}
 
-        // Update the UI based on game state
-        function updateUI() {
-            // Update status text
-            if (gameState.winner) {
-                let winnerMessage = `Player ${gameState.winner} wins!`;
-                if (vsComputer) {
-                    winnerMessage = gameState.winner === 'X' ? 'Computer wins!' : 'You win!';
-                }
-                statusDisplay.textContent = winnerMessage;
-                showWinnerModal(gameState.winner);
-            } else {
-                const phase = gameState.phase.charAt(0).toUpperCase() + gameState.phase.slice(1);
-                let statusMessage = `Phase: ${phase} | Player ${gameState.currentPlayer}'s turn`;
-                
-                if (vsComputer) {
-                    if (gameState.currentPlayer === 'X') {
-                        statusMessage = `Phase: ${phase} | Computer's turn`;
-                    } else {
-                        statusMessage = `Phase: ${phase} | Your turn`;
-                    }
-                }
-                
-                statusDisplay.textContent = statusMessage;
-            }
-            
-            // Update board
-            positions.forEach(position => {
-                const pos = position.dataset.position;
-                const piece = gameState.board[pos];
-                
-                position.textContent = piece || '';
-                position.classList.remove('piece-x', 'piece-o');
-                
-                if (piece === 'X') {
-                    position.classList.add('piece-x');
-                } else if (piece === 'O') {
-                    position.classList.add('piece-o');
-                }
-            });
-            
-            // Show valid moves if a piece is selected
-            highlightValidMoves();
-        }
-
-        // Handle position click
-        async function handlePositionClick(position) {
-            if (gameState.winner) return;
-            if (vsComputer && gameState.currentPlayer === 'X') return; // Can't play during computer's turn
-            
-            const positionIndex = position.dataset.position;
-            
-            try {
-                if (gameState.phase === 'placing') {
-                    await placePiece(positionIndex);
-                    // After player's move, make computer move if playing vs computer
-                    if (vsComputer && !gameState.winner && gameState.currentPlayer === 'X') {
-                        makeComputerMove();
-                    }
-                } else { // moving phase
-                    const hasPiece = gameState.board[positionIndex] !== null;
-                    const isCurrentPlayerPiece = gameState.board[positionIndex] === gameState.currentPlayer;
-                    
-                    if (selectedPiece === null && hasPiece && isCurrentPlayerPiece) {
-                        // Select piece to move
-                        await selectPiece(positionIndex);
-                    } else if (selectedPiece !== null && validMoves.includes(Number(positionIndex))) {
-                        // Move the selected piece
-                        await movePiece(selectedPiece, positionIndex);
-                        // After player's move, make computer move if playing vs computer
-                        if (vsComputer && !gameState.winner && gameState.currentPlayer === 'X') {
-                            makeComputerMove();
-                        }
-                    } else if (hasPiece && isCurrentPlayerPiece) {
-                        // Change selection to another piece
-                        await selectPiece(positionIndex);
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                if (error.message) {
-                    alert(error.message);
-                }
-            }
-        }
-
-        // Make computer move
-        async function makeComputerMove() {
-            if (gameState.winner) return;
-            
-            computerThinking = true;
-            thinkingDisplay.style.display = 'block';
-            
-            // Add a small delay to make the computer "think"
-            setTimeout(async () => {
-                try {
-                    const response = await fetch(`${API_URL}/computer-move`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ 
-                            gameId, 
-                            difficulty: computerDifficulty 
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (response.ok) {
-                        gameState = data.game;
-                        updateUI();
-                    } else {
-                        throw new Error(data.error);
-                    }
-                } catch (error) {
-                    console.error('Error making computer move:', error);
-                    alert('Error with computer move. Please try again.');
-                } finally {
-                    computerThinking = false;
-                    thinkingDisplay.style.display = 'none';
-                }
-            }, 700); // Delay for 700ms to give a visual indication of "thinking"
-        }
-
-        // Place a piece during the placing phase
-        async function placePiece(position) {
-            try {
-                const response = await fetch(`${API_URL}/place`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ gameId, position })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    gameState = data.game;
-                    updateUI();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                throw error;
-            }
-        }
-
-        // Select a piece to move
-        async function selectPiece(position) {
-            try {
-                const response = await fetch(`${API_URL}/select`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ gameId, position })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    gameState = data.game;
-                    selectedPiece = Number(position);
-                    validMoves = data.validMoves;
-                    
-                    // Clear previous selections
-                    positions.forEach(p => p.classList.remove('selected', 'valid-move'));
-                    
-                    // Mark the selected piece
-                    document.getElementById(`pos-${position}`).classList.add('selected');
-                    
-                    // Highlight valid moves
-                    highlightValidMoves();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                throw error;
-            }
-        }
-
-        // Move a piece
-        async function movePiece(fromPosition, toPosition) {
-            try {
-                const response = await fetch(`${API_URL}/move3`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ gameId, fromPosition, toPosition })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    gameState = data.game;
-                    selectedPiece = null;
-                    validMoves = [];
-                    
-                    // Clear highlights
-                    positions.forEach(p => p.classList.remove('selected', 'valid-move'));
-                    
-                    updateUI();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                throw error;
-            }
-        }
-
-        // Highlight valid moves
-        function highlightValidMoves() {
-            // Clear previous valid move highlights
-            positions.forEach(p => p.classList.remove('valid-move'));
-            
-            // Add highlight for valid moves
-            validMoves.forEach(move => {
-                document.getElementById(`pos-${move}`).classList.add('valid-move');
-            });
-        }
-
-        // Show the winner modal
-        function showWinnerModal(winner) {
-            let winnerMessage = `Player ${winner} Wins!`;
-            if (vsComputer) {
-                winnerMessage = winner === 'X' ? 'Computer Wins!' : 'You Win!';
-            }
-            winnerText.textContent = winnerMessage;
-            modal.style.display = 'flex';
-        }
-    </script>
-</body>
-</html>
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
